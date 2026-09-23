@@ -1,4 +1,4 @@
-﻿"""Shared voice pipeline: local microphone and manual input."""
+"""Shared voice pipeline: local microphone and manual input."""
 import re
 import threading
 import unicodedata
@@ -138,10 +138,59 @@ def process_text(text, camera_id=None, source='MICROPHONE', recognition_metadata
     store.voice_events.insert(0, event)
     if event.intent == 'SOLICITUD_AUXILIO':
         create_voice_alert(event)
+        register_capture_in_database(event)
     else:
         store.audit('Sistema', 'Voz', f'{event.id}: {event.classification}; prioridad {event.priority}', camera_id=camera_id, result=event.status)
     prune_voice_history()
     return event
+
+
+_database_enabled = [True]
+
+
+def database_reachable():
+    """Fast probe: without it psycopg waits minutes when the container is not running."""
+    import socket
+    try:
+        from services.db_service import DB_CONFIG
+    except Exception:
+        return False
+    host = re.search(r'host=(\S+)', DB_CONFIG)
+    port = re.search(r'port=(\d+)', DB_CONFIG)
+    try:
+        socket.create_connection((host[1] if host else 'localhost',
+                                  int(port[1]) if port else 5432), timeout=.4).close()
+        return True
+    except OSError:
+        return False
+
+
+def register_capture_in_database(event):
+    """Optional PostgreSQL persistence from the database module (docker-compose.yml).
+
+    The 512-d vector is simulated until the facial module produces a real one, and the
+    database is optional: a missing driver or container must never interrupt a detection.
+    """
+    if not _database_enabled[0]:
+        return None
+    if not database_reachable():
+        _database_enabled[0] = False
+        print('Base de datos no disponible: el evento se conserva en memoria y en evidencia.')
+        return None
+    try:
+        import numpy as np
+        from services.db_service import guardar_captura_rostro
+        captura = guardar_captura_rostro(codigo_camara=event.camera_id,
+                                         embedding=np.random.rand(512).astype('float32').tolist(),
+                                         ruta_foto=f'assets/capturas/alerta_{event.id}.jpg',
+                                         tipo_evento=event.subtype or 'ALERTA_AUDIO')
+    except Exception:
+        captura = None
+    if captura is None:
+        # Sin contenedor ni controlador no se reintenta: la detección no puede esperar a la red.
+        _database_enabled[0] = False
+        print('Base de datos no disponible: el evento se conserva en memoria y en evidencia.')
+    return captura
 
 
 def simulate_voice_event(text='ayuda, me están siguiendo', camera_id=None):
