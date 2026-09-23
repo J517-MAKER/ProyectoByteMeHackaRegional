@@ -34,57 +34,54 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
             'selected': selected == camera.id
         })
         
+    px_height = height if height else 500
     markers_json = json.dumps(markers_data)
-    
+
     # NiceGUI no permite <script> dentro de ui.html() — separamos el div del JS
-    map_div = '<div id="google-map" style="width: 100%; height: 100%; border-radius: 8px;"></div>'
+    map_div = f'<div id="google-map" style="width:100%;height:{px_height}px;border-radius:8px;"></div>'
 
     map_script = f"""
     <script>
       (function() {{
-        function initMap() {{
-          const mexicoBounds = {{
-            north: 32.718655,
-            south: 14.532098,
-            west: -118.407986,
-            east: -86.710405
-          }};
-          const mapElement = document.getElementById("google-map");
-          if (!mapElement) return;
+        var MARKERS_DATA = {markers_json};
+        var API_KEY = "AIzaSyClKkQmebMNSx550e2kidjW07mXxvlBgHU";
 
-          const map = new google.maps.Map(mapElement, {{
+        function buildMap() {{
+          var mapElement = document.getElementById("google-map");
+          if (!mapElement || mapElement.dataset.mapInit) return;
+          mapElement.dataset.mapInit = "1";
+
+          var mexicoBounds = {{
+            north: 32.718655, south: 14.532098,
+            west: -118.407986, east: -86.710405
+          }};
+
+          var map = new google.maps.Map(mapElement, {{
             center: {{ lat: 23.6345, lng: -102.5528 }},
             zoom: 5,
-            restriction: {{
-              latLngBounds: mexicoBounds,
-              strictBounds: false,
-            }},
+            restriction: {{ latLngBounds: mexicoBounds, strictBounds: false }},
             mapTypeId: 'roadmap',
             styles: [
               {{ elementType: "geometry", stylers: [{{ color: "#242f3e" }}] }},
               {{ elementType: "labels.text.stroke", stylers: [{{ color: "#242f3e" }}] }},
               {{ elementType: "labels.text.fill", stylers: [{{ color: "#746855" }}] }},
-              {{
-                featureType: "water",
-                elementType: "geometry",
-                stylers: [{{ color: "#17263c" }}],
-              }},
+              {{ featureType: "water", elementType: "geometry", stylers: [{{ color: "#17263c" }}] }}
             ]
           }});
 
-          const markersData = {markers_json};
-          markersData.forEach(function(data) {{
-            const pinIcon = new google.maps.MarkerImage(
-              "http://chart.apis.google.com/chart?chst=d_map_pin_letter&chld=%E2%80%A2|" + data.color.replace('#', ''),
-              new google.maps.Size(21, 34),
-              new google.maps.Point(0, 0),
-              new google.maps.Point(10, 34)
-            );
-            new google.maps.Marker({{
+          MARKERS_DATA.forEach(function(data) {{
+            var marker = new google.maps.Marker({{
               position: {{ lat: data.lat, lng: data.lng }},
               map: map,
               title: data.id + " \u00b7 " + data.name + " (" + data.status + ")",
-              icon: pinIcon
+              icon: {{
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 8,
+                fillColor: data.color,
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2
+              }}
             }});
             if (data.selected) {{
               map.setCenter({{ lat: data.lat, lng: data.lng }});
@@ -92,15 +89,14 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
             }}
           }});
 
-          if (navigator.geolocation && !markersData.some(function(m) {{ return m.selected; }})) {{
+          if (navigator.geolocation && !MARKERS_DATA.some(function(m) {{ return m.selected; }})) {{
             navigator.geolocation.getCurrentPosition(
-              function(position) {{
-                const pos = {{ lat: position.coords.latitude, lng: position.coords.longitude }};
+              function(pos) {{
                 new google.maps.Marker({{
-                  position: pos,
+                  position: {{ lat: pos.coords.latitude, lng: pos.coords.longitude }},
                   map: map,
                   title: "Tu ubicaci\u00f3n",
-                  icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                  icon: {{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#4285F4", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 }}
                 }});
               }},
               function() {{ console.warn("Geolocation failed."); }}
@@ -108,21 +104,35 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
           }}
         }}
 
+        function waitForElementAndMaps() {{
+          if (document.getElementById("google-map") && typeof google !== 'undefined' && google.maps) {{
+            buildMap();
+          }} else {{
+            var observer = new MutationObserver(function() {{
+              if (document.getElementById("google-map") && typeof google !== 'undefined' && google.maps) {{
+                observer.disconnect();
+                buildMap();
+              }}
+            }});
+            observer.observe(document.body, {{ childList: true, subtree: true }});
+          }}
+        }}
+
         if (typeof google === 'undefined' || typeof google.maps === 'undefined') {{
           var s = document.createElement('script');
-          s.src = "https://maps.googleapis.com/maps/api/js?key=AIzaSyClKkQmebMNSx550e2kidjW07mXxvlBgHU&callback=initMap";
+          s.src = "https://maps.googleapis.com/maps/api/js?key=" + API_KEY + "&loading=async&callback=__gmapsReady";
           s.async = true;
           s.defer = true;
-          window.initMap = initMap;
+          window.__gmapsReady = function() {{ waitForElementAndMaps(); }};
           document.head.appendChild(s);
         }} else {{
-          setTimeout(initMap, 100);
+          waitForElementAndMaps();
         }}
       }})();
     </script>
     """
 
-    with ui.element('div').classes('map-stage').style(f'height:{height}px; position:relative;' if height else 'height: 500px; position:relative;'):
-        ui.html(map_div).classes('w-full h-full')
+    with ui.element('div').classes('map-stage').style(f'height:{px_height}px; position:relative;'):
+        ui.html(map_div).style('width:100%;height:100%;')
         ui.add_body_html(map_script)
-        ui.label('MAPA INTERACTIVO · MÉXICO').classes('map-note').style('position: absolute; bottom: 10px; right: 10px; z-index: 1000;')
+        ui.label('MAPA INTERACTIVO · MÉXICO').classes('map-note').style('position:absolute;bottom:10px;right:10px;z-index:1000;')
