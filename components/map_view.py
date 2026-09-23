@@ -69,14 +69,14 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
       }
       /* Custom Popup Style */
       .mapboxgl-popup-content {
-        background: #242f3e;
-        color: #fff;
+        background: #ffffff;
+        color: #333333;
         border-radius: 8px;
         padding: 10px 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
       }
       .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {
-        border-top-color: #242f3e;
+        border-top-color: #ffffff;
       }
     </style>
     """
@@ -99,15 +99,22 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
         var defaultCenter = [-102.5528, 23.6345]; // Lng, Lat
         var defaultZoom  = 4.5;
 
+        // Limites de México [Lng, Lat]
+        var mexicoBounds = [
+          [-118.407986, 14.532098], // Suroeste
+          [-86.710405, 32.718655]   // Noreste
+        ];
+
         // Centrar en cámara seleccionada si existe
         var sel = MARKERS_DATA.find(function(m) {{ return m.selected; }});
         if (sel) {{ defaultCenter = [sel.lng, sel.lat]; defaultZoom = 10; }}
 
         var map = new mapboxgl.Map({{
           container: MAP_ID,
-          style: 'mapbox://styles/mapbox/dark-v11', // Dark style
+          style: 'mapbox://styles/mapbox/light-v11', // Light style (blanco)
           center: defaultCenter,
-          zoom: defaultZoom
+          zoom: defaultZoom,
+          maxBounds: mexicoBounds // Restringir navegación a México
         }});
         el._mapboxMap = map;
 

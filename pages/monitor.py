@@ -31,7 +31,7 @@ def monitor_page():
                             ui.label(detail).classes('stat-detail')
             with ui.element('div').classes('workspace-grid mt-5'):
                 with ui.column().classes('w-full gap-5 min-w-0'):
-                    with Panel('Cobertura de cámaras','MAPA INTERACTIVO · GOOGLE MAPS'):
+                    with Panel('Cobertura de cámaras','MAPA INTERACTIVO · MAPBOX'):
                         with ui.row().classes('px-4 py-2 items-center justify-between w-full border-b border-[#e5eaee]'):
                             ui.label('Región Centro').classes('text-xs font-medium')
                             with ui.row().classes('gap-1'):
