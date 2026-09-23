@@ -6,3 +6,5 @@ __pycache__/
 .nicegui/
 data/
 *.log
+# Evidencia capturada localmente: nunca se versiona.
+evidence/

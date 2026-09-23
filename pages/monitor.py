@@ -7,7 +7,7 @@ from components.status_badge import StatusBadge
 from services.cases_service import get_active_cases
 from services.cameras_service import get_cameras
 from services.facial_service import get_matches
-from services.alerts_service import get_alerts
+from services.evidence_service import get_evidence
 from services.history_service import get_history
 
 
@@ -18,11 +18,11 @@ def monitor_page():
         def content():
             cases,cameras=get_active_cases(),get_cameras()
             pending=sum(m.status in ('Pendiente de validación','En revisión') for m in get_matches())
-            alerts=sum(a.status in ('Pendiente de revisión','En revisión') for a in get_alerts())
+            alerts=sum(e.review_status in ('PENDIENTE_REVISION','EN_REVISION') for e in get_evidence())
             with ui.element('div').classes('stat-strip'):
                 for value,label,detail in [(len(cases),'Casos activos','Búsquedas en curso'),
                                            (f'{sum(c.status!="Desconectada" for c in cameras)}/{len(cameras)}','Cámaras conectadas','Red de demostración'),
-                                           (pending,'Coincidencias pendientes','Requieren validación humana'),(alerts,'Alertas por revisar','Posibles solicitudes de auxilio')]:
+                                           (pending,'Coincidencias pendientes','Requieren validación humana'),(alerts,'Evidencia por revisar','Posibles solicitudes de auxilio')]:
                     with ui.element('div').classes('stat-item'):
                         ui.label(str(value)).classes('stat-value')
                         with ui.column().classes('gap-0'):

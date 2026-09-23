@@ -1,6 +1,7 @@
 from models.alert import EmergencyAlert
 from services import store
 from services.users_service import require
+from uuid import uuid4
 
 
 def get_alerts():
@@ -19,35 +20,22 @@ def create_voice_alert(event):
     existing = next((a for a in store.alerts if a.voice_event_id==event.id),None)
     if existing:
         return existing
-    alert = EmergencyAlert(f'ALT-{len(store.alerts)+1:03d}',event.id)
+    if event.intent != 'SOLICITUD_AUXILIO':
+        raise ValueError('Sólo las posibles solicitudes de auxilio generan alertas.')
+    alert = EmergencyAlert('ALERT-' + uuid4().hex[:12].upper(),event.id, priority=event.priority)
     store.alerts.insert(0,alert)
-    store.audit('Sistema','Voz','Posible solicitud de auxilio',camera_id=event.camera_id,result='Pendiente de revisión')
+    store.audit('Sistema','Voz',f'Sistema detectó posible solicitud de auxilio en {event.camera_id}. {alert.id}; {event.classification}; prioridad {event.priority}',camera_id=event.camera_id,result='PENDIENTE_REVISION')
     return alert
-
-
-def review_alert(alert_id,status):
-    actor = require('review')
-    alert = get_alert(alert_id)
-    alert.status, alert.reviewed_by, alert.reviewed_at = status, actor, store.now()
-    event = get_alert_event(alert)
-    event.status = status
-    store.audit(actor,'Alerta',f'{alert.id}: {status}',camera_id=event.camera_id,result=status)
-
-
-def confirm_alert(alert_id):
-    review_alert(alert_id,'Evento confirmado por operador')
-
-
-def reject_alert(alert_id):
-    review_alert(alert_id,'Descartada')
-
-
-def send_to_review(alert_id):
-    review_alert(alert_id,'En revisión')
 
 
 def start_alert_tracking(alert_id):
     actor = require('track')
     alert = get_alert(alert_id)
-    alert.tracking_started = True
-    store.audit(actor,'Seguimiento',f'Seguimiento de evento {alert.id} iniciado',camera_id=get_alert_event(alert).camera_id)
+    if not alert:
+        raise ValueError('No se encontró la alerta.')
+    from services.voice_integrations import start_tracking_from_alert
+    camera_id = get_alert_event(alert).camera_id
+    result = start_tracking_from_alert(alert.id, camera_id)
+    alert.tracking_requested = True
+    store.audit(actor,'Seguimiento',f'Operador solicitó seguimiento desde {camera_id}. {alert.id}',camera_id=camera_id,result=result['status'])
+    return result

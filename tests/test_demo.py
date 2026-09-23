@@ -15,9 +15,27 @@ from nicegui.storage import Storage
 @asynccontextmanager
 async def simulation():
     # NiceGUI's test reset expects these fixture flags even with unittest.
-    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'PYTEST_CURRENT_TEST':'unittest','NICEGUI_SCREEN_TEST_PORT':'8081'}), patch.object(Storage,'path',Path(directory)/'storage'):
+    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'PYTEST_CURRENT_TEST':'unittest','NICEGUI_SCREEN_TEST_PORT':'8081'}), patch.object(Storage,'path',Path(directory)/'storage'), patch('config.AI_CONTEXT_ENABLED', False), patch('config.EVIDENCE_AUDIO_DIR',Path(directory)/'audio'), patch('config.EVIDENCE_VIDEO_DIR',Path(directory)/'video'):
         async with user_simulation(main_file=Path(__file__).resolve().parents[1]/'main.py') as user:
             yield user
+
+
+def listen(phrases,camera_id='CAM-008'):
+    """Drive the real pipeline with synthetic audio and scripted transcriptions."""
+    import numpy as np
+    import config
+    from datetime import datetime
+    from services.monitoring_service import MonitoringSession
+    monitor=MonitoringSession(camera_id=camera_id,actor='Operador01')
+    monitor.started_wall=datetime.now()
+    rate,window=config.AUDIO_SAMPLE_RATE,int(config.AUDIO_WINDOW_SECONDS*config.AUDIO_SAMPLE_RATE)
+    tone=(np.sin(np.arange(int((config.AUDIO_WINDOW_SECONDS+config.EVIDENCE_POST_SECONDS+1)*rate),dtype=np.float32)/rate*1130)*.2).astype(np.float32)
+    for phrase in phrases:
+        start=monitor.ring.written
+        monitor.ring.write(tone)
+        with patch('services.monitoring_service.transcribe_window',return_value=(phrase,{'segments':[{'text':phrase,'start':0,'end':1}]})):
+            monitor._analyze(start,start+window,-1.)
+    return monitor.results[0]
 
 
 class ErrorCollector(logging.Handler):
@@ -30,6 +48,58 @@ class ErrorCollector(logging.Handler):
 
 
 class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_monitoring_console_and_evidence_review(self):
+        async with simulation() as user:
+            from services import store
+            from services.users_service import switch_demo_user
+            await user.open('/voice')
+            await user.should_see('SERVICIO DE DETECCIÓN')
+            await user.should_see('INICIAR MONITOREO')
+            with user:
+                # Ordinary conversation leaves no evidence behind.
+                normal=listen(['ayer comí tacos y se me atoró uno, ocupé ayuda'])
+                self.assertEqual(normal['classification'],'NORMAL')
+                self.assertEqual(store.evidence,[])
+                result=listen(['qué dejaron de tarea','por favor déjame, me están siguiendo'])
+            self.assertEqual(len(store.evidence),1)
+            evidence=store.evidence[0]
+            self.assertEqual(result['event_id'],evidence.event_id)
+
+            await user.open('/alerts')
+            user.find(ui.table).trigger('review',evidence.event_id)
+            await user.should_see('CONFIRMAR PARA ATENCIÓN')
+            await user.should_see('Archivo original verificado')
+            await user.should_see('Pendiente de integración')
+            with self.assertRaises(AssertionError):  # evidence is never deleted from the interface
+                user.find('ELIMINAR')
+            user.find('MARCAR FALSO POSITIVO').click()
+            await asyncio.sleep(.2)
+            self.assertEqual(evidence.review_status,'FALSO_POSITIVO')
+            self.assertEqual(evidence.reviewed_by,'Operador01')
+            self.assertTrue((Path(evidence.audio_file).name))
+
+            user.find('SOLICITAR ELIMINACIÓN').click()
+            await user.should_see('Solicitud de eliminación')
+            user.find('Motivo de la solicitud').type('Se trataba de un ensayo escolar')
+            user.find('Enviar solicitud').click()
+            await asyncio.sleep(.2)
+            self.assertEqual(evidence.review_status,'DELETION_REQUESTED')
+            self.assertEqual(store.deletion_requests[0].requested_by,'Operador01')
+
+            with user:
+                switch_demo_user('USR-03')
+            await user.open('/alerts')
+            await user.should_see('Solicitudes de eliminación')
+            user.find('APROBAR').click()
+            await asyncio.sleep(.2)
+            self.assertEqual(store.deletion_requests[0].status,'APPROVED')
+            self.assertEqual(store.deletion_requests[0].reviewed_by,'Supervisor01')
+            self.assertEqual(evidence.review_status,'DELETION_APPROVED')
+            # For the prototype the original file is preserved after the approval.
+            import config
+            self.assertTrue((config.BASE_DIR/evidence.audio_file).exists())
+            self.assertTrue(any('aprobó la solicitud' in log.description for log in store.logs))
+
     async def test_operator_demo_end_to_end(self):
         collector=ErrorCollector()
         logging.getLogger().addHandler(collector)
@@ -43,7 +113,7 @@ class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
                 for route,title in [('/monitor','Centro de monitoreo'),('/cases','Casos de búsqueda'),
                                     ('/cases/BUS-2026-0184','Detalle del caso'),('/cameras','Red de cámaras'),
                                     ('/matches','Revisión de coincidencias'),('/tracking','Mapa y seguimiento'),
-                                    ('/alerts','Alertas de auxilio'),('/voice','Comandos de voz'),
+                                    ('/alerts','Revisión de evidencia'),('/voice','Detección de auxilio por voz'),
                                     ('/history','Historial de operaciones'),('/users','Usuarios y permisos'),
                                     ('/settings','Configuración')]:
                     await user.open(route)
@@ -76,42 +146,38 @@ class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
                 user.find('Reintentar conexión').click()
                 await user.should_see('No fue posible conectar con la cámara.')
 
-                await user.open('/voice')
-                user.find('Pruebas').click()
-                count=len(store.alerts)
-                user.find(marker='voice-start').click()
-                await asyncio.sleep(.15)
-                user.find(marker='voice-stop').click()
-                await asyncio.sleep(.75)
-                self.assertEqual(len(store.alerts),count)
-                await user.should_see('PRUEBA DETENIDA')
-                user.find(marker='voice-start').click()
-                await asyncio.sleep(3.6)
-                await user.should_see('Evento enviado correctamente')
-                self.assertEqual(len(store.alerts),count+1)
-                alert=store.alerts[0]
+                with user:
+                    listen(['vamos saliendo de clase','suéltame, ayuda'])
                 self.assertEqual(store.voice_events[0].intent,'SOLICITUD_AUXILIO')
+                evidence=store.evidence[0]
+                alert=store.alerts[0]
 
                 await user.open('/alerts')
-                user.find(ui.table).trigger('review',alert.id)
-                await user.should_see('Confirmar evento')
-                user.find('Confirmar evento').click()
-                self.assertEqual(alert.reviewed_by,'Operador01')
+                user.find(ui.table).trigger('review',evidence.event_id)
+                await user.should_see('CONFIRMAR PARA ATENCIÓN')
+                user.find('CONFIRMAR PARA ATENCIÓN').click()
+                await asyncio.sleep(.2)
+                self.assertEqual(evidence.review_status,'CONFIRMADO_PARA_ATENCION')
+                self.assertEqual(evidence.reviewed_by,'Operador01')
                 user.find('Iniciar seguimiento').click()
                 await asyncio.sleep(.2)
-                self.assertTrue(alert.tracking_started)
-                await user.should_see('Evento independiente de los casos')
+                self.assertTrue(alert.tracking_requested)
+                self.assertFalse(alert.tracking_started)
+                await user.should_see('Módulo de seguimiento pendiente de integración.')
 
-                await user.open('/voice')
-                user.find('Comandos de autoridad').click()
-                user.find('Simular comando').click()
-                await asyncio.sleep(1.2)
-                await user.should_see('MOSTRAR_ULTIMA_DETECCION')
-                user.find('Abrir resultado').click()
-                await asyncio.sleep(.2)
-                await user.should_see('Mapa y seguimiento')
                 with user:
                     self.assertFalse(process_voice_command('mensaje sin intención')['recognized'])
+                    from nicegui import app
+                    from services.voice_integrations import execute_authority_command
+                    with patch('services.voice_integrations.execute_authority_command', wraps=execute_authority_command) as execute:
+                        result=process_voice_command('iniciar búsqueda del folio 527')
+                        self.assertTrue(result['recognized'])
+                        execute.assert_not_called()
+                        app.storage.user['authenticated']=True
+                        result=process_voice_command('iniciar búsqueda del folio 527')
+                        self.assertTrue(result['mock'])
+                        execute.assert_called_once()
+                        app.storage.user['authenticated']=False
                     with self.assertRaises(PermissionError):
                         update_user('USR-02','Supervisor','Activo')
                     with self.assertRaises(ValueError):

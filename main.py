@@ -1,13 +1,35 @@
 import os
 import secrets
+import asyncio
+from nicegui import background_tasks
 from nicegui import app,ui
+import config
 from config import BASE_DIR,HOST,PORT
 from assets.build_demo import build_assets
+from services.evidence_service import ensure_directories
 
 build_assets()
+ensure_directories()
 app.add_static_files('/assets',str(BASE_DIR/'assets'))
+# Original evidence is served read-only; it is never written from the browser.
+app.add_media_files('/evidence/audio',str(config.EVIDENCE_AUDIO_DIR))
 
 from pages import monitor,cases,case_detail,cameras,matches,tracking,alerts,voice,history,users,settings  # noqa: E402,F401
+
+
+async def expire_voice_transcripts():
+    from services.voice_service import prune_voice_history
+    while True:
+        prune_voice_history()
+        await asyncio.sleep(1)
+
+
+def start_voice_retention():
+    background_tasks.create(expire_voice_transcripts())
+
+
+if not app.is_started:  # the interface tests re-execute this module
+    app.on_startup(start_voice_retention)
 
 
 @ui.page('/')

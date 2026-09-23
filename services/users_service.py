@@ -1,9 +1,12 @@
 from nicegui import app
 from services import store
 
-PERMISSIONS = {'Operador': {'case', 'review', 'track', 'voice'},
-               'Supervisor': {'case', 'review', 'track', 'voice', 'settings'},
-               'Administrador': {'case', 'review', 'track', 'voice', 'settings', 'users'}}
+# Separation of duties: detecting, reviewing and authorising a deletion are different rights.
+OPERATOR = {'case', 'review', 'track', 'voice', 'deletion.request'}
+SUPERVISOR = OPERATOR | {'settings', 'deletion.approve'}
+PERMISSIONS = {'Operador': OPERATOR,
+               'Supervisor': SUPERVISOR,
+               'Administrador': SUPERVISOR | {'users', 'audit'}}
 
 
 def get_users():
@@ -29,6 +32,7 @@ def require(action):
 def switch_demo_user(user_id):
     user = next(u for u in store.users if u.id == user_id and u.status == 'Activo')
     app.storage.user['user_id'] = user.id
+    app.storage.user['authenticated'] = False
     store.audit(user.username, 'Sesión', f'Sesión de demostración: {user.role}')
 
 
