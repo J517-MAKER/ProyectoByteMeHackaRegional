@@ -37,101 +37,132 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
     px_height = height if height else 500
     markers_json = json.dumps(markers_data)
 
-    # NiceGUI no permite <script> dentro de ui.html() — separamos el div del JS
-    map_div = f'<div id="google-map" style="width:100%;height:{px_height}px;border-radius:8px;"></div>'
+    map_id = f'leaflet-map-{abs(hash(markers_json)) % 999999}'
+
+    # Leaflet CSS + JS — gratuito, sin API key, sin facturación
+    leaflet_head = """
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <style>
+      .user-dot {
+        width: 16px; height: 16px;
+        background: #4285F4;
+        border: 3px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 4px rgba(66,133,244,0.35);
+        animation: pulse-ring 1.8s ease-out infinite;
+      }
+      @keyframes pulse-ring {
+        0%   { box-shadow: 0 0 0 0   rgba(66,133,244,0.5); }
+        70%  { box-shadow: 0 0 0 12px rgba(66,133,244,0); }
+        100% { box-shadow: 0 0 0 0   rgba(66,133,244,0); }
+      }
+    </style>
+    """
+
+    map_div = f'<div id="{map_id}" style="width:100%;height:{px_height}px;border-radius:8px;z-index:0;"></div>'
 
     map_script = f"""
     <script>
-      (function() {{
-        var MARKERS_DATA = {markers_json};
-        var API_KEY = "AIzaSyClKkQmebMNSx550e2kidjW07mXxvlBgHU";
+    (function() {{
+      var MAP_ID       = "{map_id}";
+      var MARKERS_DATA = {markers_json};
 
-        function buildMap() {{
-          var mapElement = document.getElementById("google-map");
-          if (!mapElement || mapElement.dataset.mapInit) return;
-          mapElement.dataset.mapInit = "1";
+      function svgIcon(color, size) {{
+        size = size || 10;
+        var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (size*2) + '" height="' + (size*2) + '">'
+          + '<circle cx="' + size + '" cy="' + size + '" r="' + (size-2) + '" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+          + '</svg>';
+        return L.icon({{
+          iconUrl: 'data:image/svg+xml;base64,' + btoa(svg),
+          iconSize: [size*2, size*2],
+          iconAnchor: [size, size],
+          popupAnchor: [0, -size]
+        }});
+      }}
 
-          var mexicoBounds = {{
-            north: 32.718655, south: 14.532098,
-            west: -118.407986, east: -86.710405
-          }};
+      function initMap() {{
+        var el = document.getElementById(MAP_ID);
+        if (!el || el._leafletMap) return;
 
-          var map = new google.maps.Map(mapElement, {{
-            center: {{ lat: 23.6345, lng: -102.5528 }},
-            zoom: 5,
-            restriction: {{ latLngBounds: mexicoBounds, strictBounds: false }},
-            mapTypeId: 'roadmap',
-            styles: [
-              {{ elementType: "geometry", stylers: [{{ color: "#242f3e" }}] }},
-              {{ elementType: "labels.text.stroke", stylers: [{{ color: "#242f3e" }}] }},
-              {{ elementType: "labels.text.fill", stylers: [{{ color: "#746855" }}] }},
-              {{ featureType: "water", elementType: "geometry", stylers: [{{ color: "#17263c" }}] }}
-            ]
-          }});
+        var defaultCenter = [23.6345, -102.5528];
+        var defaultZoom  = 5;
 
-          MARKERS_DATA.forEach(function(data) {{
-            var marker = new google.maps.Marker({{
-              position: {{ lat: data.lat, lng: data.lng }},
-              map: map,
-              title: data.id + " \u00b7 " + data.name + " (" + data.status + ")",
-              icon: {{
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: data.color,
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2
+        // Centrar en cámara seleccionada si existe
+        var sel = MARKERS_DATA.find(function(m) {{ return m.selected; }});
+        if (sel) {{ defaultCenter = [sel.lat, sel.lng]; defaultZoom = 10; }}
+
+        var map = L.map(MAP_ID, {{ center: defaultCenter, zoom: defaultZoom, zoomControl: true }});
+        el._leafletMap = map;
+
+        // Tiles oscuros CartoDB Dark Matter — gratuitos, sin API key
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }}).addTo(map);
+
+        // Marcadores de cámaras
+        MARKERS_DATA.forEach(function(data) {{
+          var size = data.selected ? 14 : 10;
+          var marker = L.marker([data.lat, data.lng], {{ icon: svgIcon(data.color, size) }}).addTo(map);
+          marker.bindPopup(
+            '<b>' + data.id + '</b><br>' + data.name + '<br><span style="color:' + data.color + '">' + data.status + '</span>'
+          );
+          if (data.selected) {{ marker.openPopup(); }}
+        }});
+
+        // Ubicación actual del usuario — marcador pulsante azul
+        if (navigator.geolocation) {{
+          navigator.geolocation.getCurrentPosition(
+            function(pos) {{
+              var lat = pos.coords.latitude;
+              var lng = pos.coords.longitude;
+              var acc = pos.coords.accuracy;
+
+              var userIcon = L.divIcon({{
+                className: '',
+                html: '<div class="user-dot"></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+              }});
+
+              var userMarker = L.marker([lat, lng], {{ icon: userIcon, zIndexOffset: 1000 }}).addTo(map);
+              userMarker.bindPopup('<b>Tu ubicación actual</b><br>Precisión: ' + Math.round(acc) + ' m');
+
+              // Círculo de precisión
+              L.circle([lat, lng], {{
+                radius: acc,
+                color: '#4285F4',
+                fillColor: '#4285F4',
+                fillOpacity: 0.08,
+                weight: 1
+              }}).addTo(map);
+
+              // Solo centra en el usuario si no hay cámara seleccionada
+              if (!MARKERS_DATA.some(function(m) {{ return m.selected; }})) {{
+                map.setView([lat, lng], 14);
               }}
-            }});
-            if (data.selected) {{
-              map.setCenter({{ lat: data.lat, lng: data.lng }});
-              map.setZoom(10);
-            }}
-          }});
-
-          if (navigator.geolocation && !MARKERS_DATA.some(function(m) {{ return m.selected; }})) {{
-            navigator.geolocation.getCurrentPosition(
-              function(pos) {{
-                new google.maps.Marker({{
-                  position: {{ lat: pos.coords.latitude, lng: pos.coords.longitude }},
-                  map: map,
-                  title: "Tu ubicaci\u00f3n",
-                  icon: {{ path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#4285F4", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 }}
-                }});
-              }},
-              function() {{ console.warn("Geolocation failed."); }}
-            );
-          }}
+            }},
+            function(err) {{ console.warn('Geolocalización no disponible:', err.message); }},
+            {{ enableHighAccuracy: true, timeout: 10000 }}
+          );
         }}
+      }}
 
-        function waitForElementAndMaps() {{
-          if (document.getElementById("google-map") && typeof google !== 'undefined' && google.maps) {{
-            buildMap();
-          }} else {{
-            var observer = new MutationObserver(function() {{
-              if (document.getElementById("google-map") && typeof google !== 'undefined' && google.maps) {{
-                observer.disconnect();
-                buildMap();
-              }}
-            }});
-            observer.observe(document.body, {{ childList: true, subtree: true }});
-          }}
-        }}
-
-        if (typeof google === 'undefined' || typeof google.maps === 'undefined') {{
-          var s = document.createElement('script');
-          s.src = "https://maps.googleapis.com/maps/api/js?key=" + API_KEY + "&loading=async&callback=__gmapsReady";
-          s.async = true;
-          s.defer = true;
-          window.__gmapsReady = function() {{ waitForElementAndMaps(); }};
-          document.head.appendChild(s);
+      function waitAndInit() {{
+        if (document.getElementById(MAP_ID) && typeof L !== 'undefined') {{
+          initMap();
         }} else {{
-          waitForElementAndMaps();
+          setTimeout(waitAndInit, 150);
         }}
-      }})();
+      }}
+      waitAndInit();
+    }})();
     </script>
     """
 
+    ui.add_head_html(leaflet_head)
     with ui.element('div').classes('map-stage').style(f'height:{px_height}px; position:relative;'):
         ui.html(map_div).style('width:100%;height:100%;')
         ui.add_body_html(map_script)
