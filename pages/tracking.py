@@ -1,4 +1,5 @@
 from datetime import datetime
+# pyrefly: ignore [missing-import]
 from nicegui import ui
 from components.layout import PageLayout,Panel
 from components.map_view import MapView

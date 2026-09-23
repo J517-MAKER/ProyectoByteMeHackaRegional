@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from nicegui import ui
 import json
 from services.cameras_service import get_cameras
@@ -35,95 +36,93 @@ def MapView(cameras=None,detections=None,selected=None,on_select=None,height=Non
         
     markers_json = json.dumps(markers_data)
     
-    map_html = f"""
-    <div id="google-map" style="width: 100%; height: 100%; border-radius: 8px;"></div>
+    # NiceGUI no permite <script> dentro de ui.html() — separamos el div del JS
+    map_div = '<div id="google-map" style="width: 100%; height: 100%; border-radius: 8px;"></div>'
+
+    map_script = f"""
     <script>
-      function initMap() {{
-        const mexicoBounds = {{
+      (function() {{
+        function initMap() {{
+          const mexicoBounds = {{
             north: 32.718655,
             south: 14.532098,
             west: -118.407986,
             east: -86.710405
-        }};
-        const mapElement = document.getElementById("google-map");
-        if (!mapElement) return;
-        
-        const map = new google.maps.Map(mapElement, {{
-          center: {{ lat: 23.6345, lng: -102.5528 }},
-          zoom: 5,
-          restriction: {{
-            latLngBounds: mexicoBounds,
-            strictBounds: false,
-          }},
-          mapTypeId: 'roadmap',
-          styles: [
-            {{ elementType: "geometry", stylers: [{{ color: "#242f3e" }}] }},
-            {{ elementType: "labels.text.stroke", stylers: [{{ color: "#242f3e" }}] }},
-            {{ elementType: "labels.text.fill", stylers: [{{ color: "#746855" }}] }},
-            {{
-              featureType: "water",
-              elementType: "geometry",
-              stylers: [{{ color: "#17263c" }}],
+          }};
+          const mapElement = document.getElementById("google-map");
+          if (!mapElement) return;
+
+          const map = new google.maps.Map(mapElement, {{
+            center: {{ lat: 23.6345, lng: -102.5528 }},
+            zoom: 5,
+            restriction: {{
+              latLngBounds: mexicoBounds,
+              strictBounds: false,
             }},
-          ]
-        }});
-        
-        // Agregar marcadores dinámicos
-        const markersData = {markers_json};
-        markersData.forEach(data => {{
-            // Custom marker icon usando el color calculado
+            mapTypeId: 'roadmap',
+            styles: [
+              {{ elementType: "geometry", stylers: [{{ color: "#242f3e" }}] }},
+              {{ elementType: "labels.text.stroke", stylers: [{{ color: "#242f3e" }}] }},
+              {{ elementType: "labels.text.fill", stylers: [{{ color: "#746855" }}] }},
+              {{
+                featureType: "water",
+                elementType: "geometry",
+                stylers: [{{ color: "#17263c" }}],
+              }},
+            ]
+          }});
+
+          const markersData = {markers_json};
+          markersData.forEach(function(data) {{
             const pinIcon = new google.maps.MarkerImage(
-                "http://chart.apis.google.com/chart?chst=d_map_pin_letter&chld=%E2%80%A2|" + data.color.replace('#', ''),
-                new google.maps.Size(21, 34),
-                new google.maps.Point(0,0),
-                new google.maps.Point(10, 34)
+              "http://chart.apis.google.com/chart?chst=d_map_pin_letter&chld=%E2%80%A2|" + data.color.replace('#', ''),
+              new google.maps.Size(21, 34),
+              new google.maps.Point(0, 0),
+              new google.maps.Point(10, 34)
             );
-            
-            const marker = new google.maps.Marker({{
-                position: {{ lat: data.lat, lng: data.lng }},
-                map: map,
-                title: data.id + " · " + data.name + " (" + data.status + ")",
-                icon: pinIcon
+            new google.maps.Marker({{
+              position: {{ lat: data.lat, lng: data.lng }},
+              map: map,
+              title: data.id + " \u00b7 " + data.name + " (" + data.status + ")",
+              icon: pinIcon
             }});
-            
             if (data.selected) {{
-                map.setCenter({{ lat: data.lat, lng: data.lng }});
-                map.setZoom(10);
+              map.setCenter({{ lat: data.lat, lng: data.lng }});
+              map.setZoom(10);
             }}
-        }});
-        
-        if (navigator.geolocation && !markersData.some(m => m.selected)) {{
-          navigator.geolocation.getCurrentPosition(
-            (position) => {{
-              const pos = {{
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-              }};
-              new google.maps.Marker({{
-                position: pos,
-                map: map,
-                title: "Tu ubicación",
-                icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
-              }});
-            }},
-            () => {{ console.warn("Geolocation failed."); }}
-          );
+          }});
+
+          if (navigator.geolocation && !markersData.some(function(m) {{ return m.selected; }})) {{
+            navigator.geolocation.getCurrentPosition(
+              function(position) {{
+                const pos = {{ lat: position.coords.latitude, lng: position.coords.longitude }};
+                new google.maps.Marker({{
+                  position: pos,
+                  map: map,
+                  title: "Tu ubicaci\u00f3n",
+                  icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                }});
+              }},
+              function() {{ console.warn("Geolocation failed."); }}
+            );
+          }}
         }}
-      }}
-      
-      if (typeof google === 'undefined' || typeof google.maps === 'undefined') {{
-          const script = document.createElement('script');
-          script.src = "https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY_HERE&callback=initMap";
-          script.async = true;
-          script.defer = true;
+
+        if (typeof google === 'undefined' || typeof google.maps === 'undefined') {{
+          var s = document.createElement('script');
+          s.src = "https://maps.googleapis.com/maps/api/js?key=AIzaSyClKkQmebMNSx550e2kidjW07mXxvlBgHU&callback=initMap";
+          s.async = true;
+          s.defer = true;
           window.initMap = initMap;
-          document.head.appendChild(script);
-      }} else {{
+          document.head.appendChild(s);
+        }} else {{
           setTimeout(initMap, 100);
-      }}
+        }}
+      }})();
     </script>
     """
-    
+
     with ui.element('div').classes('map-stage').style(f'height:{height}px; position:relative;' if height else 'height: 500px; position:relative;'):
-        ui.html(map_html).classes('w-full h-full')
+        ui.html(map_div).classes('w-full h-full')
+        ui.add_body_html(map_script)
         ui.label('MAPA INTERACTIVO · MÉXICO').classes('map-note').style('position: absolute; bottom: 10px; right: 10px; z-index: 1000;')
