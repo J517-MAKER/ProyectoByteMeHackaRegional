@@ -1,0 +1,8 @@
+.venv/
+venv/
+.tools/
+__pycache__/
+*.pyc
+.nicegui/
+data/
+*.log
