@@ -3,6 +3,7 @@ from nicegui import ui
 from theme import apply_theme
 from components.sidebar import Sidebar
 from components.header import Header
+from components.admin_voice_assistant import AdminVoiceAssistant
 
 
 @contextmanager
@@ -11,6 +12,7 @@ def PageLayout(active,title,subtitle,eyebrow='CENTRO DE OPERACIONES'):
     ui.page_title(f'{title} · NEXO')
     drawer = Sidebar(active)
     Header(drawer)
+    AdminVoiceAssistant()  # single instance for every page; hidden for non-administrators
     with ui.element('div').classes('page-heading'):
         with ui.column().classes('gap-0'):
             ui.label(eyebrow).classes('eyebrow')

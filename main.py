@@ -7,14 +7,18 @@ import config
 from config import BASE_DIR,HOST,PORT
 from assets.build_demo import build_assets
 from services.evidence_service import ensure_directories
+from services.alert_import_service import ensure_directories as ensure_import_directories
 
 build_assets()
 ensure_directories()
+ensure_import_directories()
 app.add_static_files('/assets',str(BASE_DIR/'assets'))
 # Original evidence is served read-only; it is never written from the browser.
 app.add_media_files('/evidence/audio',str(config.EVIDENCE_AUDIO_DIR))
+# Fichas importadas: vista previa y recorte temporales de la importación en curso.
+app.add_static_files('/imports',str(config.IMPORT_DIR))
 
-from pages import monitor,cases,case_detail,cameras,matches,tracking,alerts,voice,history,users,settings  # noqa: E402,F401
+from pages import monitor,cases,import_alert,case_detail,cameras,matches,tracking,alerts,voice,history,users,settings  # noqa: E402,F401
 
 
 async def expire_voice_transcripts():

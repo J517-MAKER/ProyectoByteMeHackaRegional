@@ -36,6 +36,8 @@ def cases_page():
             table.on('open',lambda e:ui.navigate.to(f'/cases/{e.args}'))
         with ui.row().classes('items-center justify-between w-full'):
             ui.label('EXPEDIENTES / DATOS DE PRUEBA').classes('eyebrow')
-            ui.button('Nueva búsqueda',icon='add',on_click=lambda:NewCaseDialog()).props('unelevated no-caps').set_enabled(can('case'))
+            with ui.row().classes('gap-2'):
+                ui.button('Crear caso desde alerta',icon='document_scanner',on_click=lambda:ui.navigate.to('/cases/import-alert')).props('unelevated no-caps').set_enabled(can('case'))
+                ui.button('Nueva búsqueda manual',icon='add',on_click=lambda:NewCaseDialog()).props('outline no-caps').set_enabled(can('case'))
         fields.update(SearchFilters(lambda:case_table.refresh(),statuses=['En búsqueda','Pausada'],zones=sorted({c.zone for c in get_cases()}),owners=sorted({c.owner for c in get_cases()}),with_date=True))
         case_table()

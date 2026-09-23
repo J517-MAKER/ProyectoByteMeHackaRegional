@@ -100,6 +100,39 @@ class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((config.BASE_DIR/evidence.audio_file).exists())
             self.assertTrue(any('aprobó la solicitud' in log.description for log in store.logs))
 
+    async def test_admin_assistant_is_restricted_and_navigates(self):
+        async with simulation() as user:
+            import numpy as np
+            from services import store
+            from services.users_service import switch_demo_user
+            from services.voice_service import MicrophoneCapture
+
+            await user.open('/monitor')
+            with self.assertRaises(AssertionError):  # el operador no ve el asistente
+                user.find(marker='assistant-button')
+
+            with user:
+                switch_demo_user('USR-04')
+            await user.open('/monitor')
+            user.find(marker='assistant-button')
+
+            with patch.object(MicrophoneCapture, 'start', lambda self: None), \
+                 patch.object(MicrophoneCapture, 'stop', lambda self: np.zeros(16000, dtype='float32')), \
+                 patch('components.admin_voice_assistant.transcribe_audio',
+                       return_value=('búscame el folio 184', {})):
+                user.find(marker='assistant-button').click()
+                await asyncio.sleep(.2)
+                await user.should_see('Escuchando')
+                user.find(marker='assistant-button').click()
+                await asyncio.sleep(1.0)
+                await user.should_see('búscame el folio 184')
+                await user.should_see('Caso BUS-2026-0184 encontrado')
+            entry=store.logs[0]
+            self.assertEqual((entry.user,entry.kind,entry.result),('Admin01','Comando de voz','SUCCESS'))
+            self.assertIn('OPEN_CASE',entry.description)
+            await asyncio.sleep(1.4)
+            await user.should_see('Detalle del caso')
+
     async def test_operator_demo_end_to_end(self):
         collector=ErrorCollector()
         logging.getLogger().addHandler(collector)
@@ -111,7 +144,8 @@ class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
                 from services.voice_service import process_voice_command
 
                 for route,title in [('/monitor','Centro de monitoreo'),('/cases','Casos de búsqueda'),
-                                    ('/cases/BUS-2026-0184','Detalle del caso'),('/cameras','Red de cámaras'),
+                                    ('/cases/BUS-2026-0184','Detalle del caso'),
+                                    ('/cases/import-alert','Importar alerta de búsqueda'),('/cameras','Red de cámaras'),
                                     ('/matches','Revisión de coincidencias'),('/tracking','Mapa y seguimiento'),
                                     ('/alerts','Revisión de evidencia'),('/voice','Detección de auxilio por voz'),
                                     ('/history','Historial de operaciones'),('/users','Usuarios y permisos'),
@@ -123,7 +157,8 @@ class DemoFlowTest(unittest.IsolatedAsyncioTestCase):
                 user.find('Buscar nombre o folio').type('sin coincidencias de prueba')
                 await user.should_see('No hay registros para los filtros seleccionados.')
                 user.find('Buscar nombre o folio').clear()
-                user.find('Nueva búsqueda').click()
+                await user.should_see('Crear caso desde alerta')
+                user.find('Nueva búsqueda manual').click()
                 user.find('Nombre completo *').type('Persona de prueba QA')
                 user.find('Registrar caso y procesar referencias').click()
                 await asyncio.sleep(.2)

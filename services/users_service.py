@@ -6,7 +6,7 @@ OPERATOR = {'case', 'review', 'track', 'voice', 'deletion.request'}
 SUPERVISOR = OPERATOR | {'settings', 'deletion.approve'}
 PERMISSIONS = {'Operador': OPERATOR,
                'Supervisor': SUPERVISOR,
-               'Administrador': SUPERVISOR | {'users', 'audit'}}
+               'Administrador': SUPERVISOR | {'users', 'audit', 'assistant'}}
 
 
 def get_users():

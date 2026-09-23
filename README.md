@@ -54,7 +54,8 @@ La app escucha únicamente en `127.0.0.1` de forma predeterminada. Variables opc
 | Ruta | Función |
 | --- | --- |
 | `/monitor` | Plano de cámaras, actividad, expedientes activos y vistas de interés |
-| `/cases` | Tabla administrativa con búsqueda y filtros; alta de caso |
+| `/cases` | Tabla administrativa con búsqueda y filtros; alta de caso manual o desde alerta |
+| `/cases/import-alert` | Importación de fichas de búsqueda (JPG, PNG, WebP o PDF): OCR, fotografía, coincidencias y alta de caso |
 | `/cases/{case_id}` | Referencias, información del reporte, detecciones y línea temporal |
 | `/cameras` | CCTV 2 × 2, 3 × 3 y 4 × 4; filtros, grupos y panel por cámara |
 | `/matches` | Comparación de imágenes, validación, descarte y revisión |
@@ -103,11 +104,13 @@ tests/                   # recorrido integral mediante simulador de NiceGUI
 | Integración | Archivos principales |
 | --- | --- |
 | Gestión de reportes | `services/cases_service.py`, `models/person.py`, `models/search_case.py` |
+| Importación de alertas | `services/alert_import_service.py`, `models/alert_import_record.py`, `components/alert_preview.py` |
 | Reconocimiento facial | `services/facial_service.py`, `models/detection.py`, `models/match.py` |
 | Cámaras | `services/cameras_service.py`, `models/camera.py`, `components/camera_feed.py` |
 | Reidentificación / seguimiento | `services/tracking_service.py`, `components/map_view.py` |
 | Voz e intenciones | `services/voice_service.py`, `models/voice_event.py` |
 | Escucha continua | `services/monitoring_service.py`, `services/audio_buffer.py` |
+| Asistente administrativo | `services/admin_voice_assistant_service.py`, `components/admin_voice_assistant.py`, `models/assistant_command.py` |
 | Evidencia y eliminación | `services/evidence_service.py`, `models/evidence_event.py`, `models/deletion_request.py` |
 | Alertas y seguimiento | `services/alerts_service.py`, `models/alert.py` |
 | Usuarios, auditoría y backend | `services/users_service.py`, `services/history_service.py`, `services/store.py` |
@@ -140,6 +143,73 @@ El arranque y las once rutas también fueron comprobados mediante HTTP. La revis
 
 Referencia del framework: [documentación oficial de NiceGUI](https://nicegui.io/documentation).
 
+
+## Importar alertas de búsqueda (OCR)
+
+Permite partir de una ficha real de persona desaparecida en lugar de capturar todo
+a mano. Es un **apoyo a la decisión**: ni identifica personas ni confirma
+localizaciones.
+
+### Flujo
+
+```text
+/cases → Crear caso desde alerta → /cases/import-alert
+
+1 Subir ficha (JPG, PNG, WebP o PDF, hasta 10 MB)
+2 Extracción automática: OCR + recorte de la fotografía
+3 Revisión y corrección de los campos por el operador
+4 Coincidencias: textual, facial (preparada) y contextual
+5 Crear caso nuevo · Vincular con caso existente · Enviar a revisión · Cancelar
+```
+
+### Qué se extrae
+
+Nombre completo, folio de la alerta, edad, sexo reportado, nacionalidad, fecha de
+desaparición, fecha del reporte, lugar de los hechos, descripción física, señas
+particulares, vestimenta, autoridad emisora y carpeta de investigación. Lo que no
+pueda leerse se queda vacío: **nunca se inventa un dato**. El estado de extracción
+se muestra como `EXTRACCION_COMPLETA`, `EXTRACCION_PARCIAL`, `SIN_TEXTO_RECONOCIDO`
+o `REVISADA_POR_OPERADOR`, y todos los campos son editables antes de continuar.
+
+### Motores de lectura
+
+| Etapa | Herramienta | Nota |
+|---|---|---|
+| PDF con capa de texto | PyMuPDF | No necesita OCR |
+| PDF escaneado / imagen | Tesseract si está instalado, si no **RapidOCR** | RapidOCR es autónomo: no requiere binarios externos |
+| Fotografía | OpenCV: rostro (Haar) → región fotográfica → imagen incrustada del PDF | Recorte orientativo, revisable |
+
+El OCR pega palabras en los títulos en negritas («NOMBRECOMPLETO:»), así que el
+lector compara las etiquetas sin espacios ni acentos y admite la fecha en formatos
+`22 de septiembre de 2026`, `23/09/2026` o `2026-09-22`. Si ningún motor está
+disponible, el módulo lo dice y el operador captura los datos a mano.
+
+### Las tres comparaciones
+
+1. **Textual** — compara con los casos existentes por nombre, sexo, rango de edad,
+   lugar, fecha, señas y vestimenta. Devuelve un puntaje de similitud y un nivel
+   `ALTA`, `MEDIA` o `BAJA`, siempre redactado como «coincidencia textual», nunca
+   como identidad.
+2. **Facial** — este módulo **no reconoce rostros**. Recorta la fotografía, prepara
+   la referencia y arma el conjunto de cámaras candidatas. Los puntos de
+   integración para el módulo del compañero son
+   `prepare_face_reference(photo_path)`, `match_face_reference(face_reference)` y
+   `compare_with_face_database(reference_photo)`. Mientras no exista ese módulo el
+   estado es `PENDIENTE_MODULO_FACIAL` y **no se asigna ningún nivel**: inventarlo
+   sería fabricar una coincidencia que nadie calculó.
+3. **Contextual** — cruza el lugar reportado con las cámaras de la zona, la fecha
+   con las detecciones dentro de ±15 días (`IMPORT_DATE_WINDOW_DAYS`) y resume las
+   cámaras relacionadas.
+
+### Acciones finales y retención
+
+Crear caso usa el servicio existente `create_case`, con la fotografía recortada
+como referencia y los datos de la alerta en la descripción; vincular asocia la
+alerta a un caso ya registrado. Ambas dejan el expediente pendiente de validación.
+Cancelar **elimina los archivos temporales**. Las fichas viven en `imports/`
+(`documents/` y `photos/`), carpeta excluida de Git y separada de `evidence/`: una
+ficha importada no es evidencia de auxilio. Cada paso —análisis, corrección de
+campos, comparación, alta, vínculo, revisión y cancelación— queda en la bitácora.
 
 ## Detección de auxilio por voz (audio real)
 
@@ -301,6 +371,82 @@ servicios de Python, no en la interfaz.
 Referencias de las APIs: [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 y [sounddevice](https://python-sounddevice.readthedocs.io/).
 
+## Asistente de voz para administradores
+
+Módulo **independiente** de la detección automática de auxilio: no comparte
+buffer, contexto, evidencia ni almacenamiento. Es un atajo de navegación por voz.
+
+### Cómo se usa
+
+Con una sesión de rol **Administrador** aparece una bolita con micrófono fija en
+la esquina inferior derecha de todas las páginas. Es push-to-talk con un solo
+botón:
+
+1. Toca la bolita → empieza a grabar, el botón se pone rojo con un pulso discreto
+   y el panel muestra «● Escuchando…».
+2. Toca **la misma bolita** → detiene la grabación y muestra «Procesando…».
+3. faster-whisper transcribe (reutiliza el modelo ya cargado en memoria, no carga
+   otro), la IA interpreta la intención y se ejecuta el comando.
+4. El panel muestra lo que se dijo y el resultado; si corresponde, navega solo y
+   deja una confirmación discreta en la página de destino.
+
+Estados del botón: `IDLE` 🎙 · `LISTENING` ■ · `PROCESSING` … · `SUCCESS` ✓ ·
+`ERROR` ! . Tras unos segundos vuelve solo a `IDLE`.
+
+### Permisos
+
+Sólo el rol **Administrador** tiene el permiso `assistant`. Para los demás roles
+el botón no se dibuja **y además** `handle_command` vuelve a comprobar el rol en
+el servidor, así que el comando no se ejecuta aunque alguien llame al servicio
+directamente.
+
+### Comandos que entiende
+
+No hay que memorizar frases: el servicio interpreta lenguaje natural y varias
+formas equivalentes producen la misma intención.
+
+| Ejemplos hablados | Intención | Resultado |
+|---|---|---|
+| «búscame el folio 184», «abre el caso 184», «quiero ver el folio 184», «abre el caso BUS-2026-0184» | `OPEN_CASE` | Abre `/cases/BUS-2026-0184` |
+| «busca a María López», «muéstrame el caso de María López» | `SEARCH_PERSON` | Abre el caso si hay una sola coincidencia |
+| «muéstrame la última detección del folio 184», «¿dónde se detectó por última vez el caso 184?» | `SHOW_LAST_DETECTION` | Muestra cámara, ubicación y hora, y abre el seguimiento |
+| «muéstrame las coincidencias del folio 184» | `SHOW_MATCHES` | Abre `/matches?case_id=…` |
+| «muéstrame la cámara 8», «abre CAM-008», «abre la cámara ocho» | `OPEN_CAMERA` | Abre `/cameras?camera_id=CAM-008` |
+| «muéstrame las alertas pendientes» | `SHOW_PENDING_ALERTS` | Abre `/alerts` filtrado por pendientes |
+| «abre las alertas de hoy» | `SHOW_ALERTS` | Abre `/alerts` |
+| «hola cómo estás», «pásame aquello de ayer» | `UNKNOWN_COMMAND` | «No entendí el comando. Intenta decirlo nuevamente.» y **no ejecuta nada** |
+
+Si un nombre coincide con varias personas, el panel lista las opciones con su
+folio y el administrador elige: el asistente nunca decide por él. Si falta el
+dato necesario (folio, cámara o nombre) responde el problema en lugar de adivinar.
+
+### Interpretación y fallback
+
+`services/admin_voice_assistant_service.py` envía la transcripción al proveedor de
+IA configurado (`AI_PROVIDER`, `AI_MODEL`, `AI_CONTEXT_URL`) pidiendo un JSON con
+el esquema de `AssistantCommand`, validado con Pydantic. Si el proveedor no está
+disponible, responde algo inválido o inventa una intención sin su dato obligatorio,
+se usan reglas locales deterministas. Ambos caminos producen la misma estructura,
+por ejemplo `{"intent": "OPEN_CASE", "folio": "184"}`.
+
+### Límites de seguridad
+
+El asistente sólo **busca, muestra, abre, consulta y navega**. No puede borrar
+evidencia, aprobar eliminaciones, eliminar casos o usuarios, cambiar permisos ni
+confirmar alertas por voz: esas intenciones no existen y cualquier otra se rechaza
+en `execute`. Si en el futuro se agregan acciones sensibles deberán pedir
+confirmación manual.
+
+### Auditoría y audio
+
+Cada comando ejecutado deja una entrada en la bitácora con usuario, fecha, frase
+transcrita, intención y resultado; por ejemplo
+`Admin01 · Comando de voz · "búscame el folio 184" → OPEN_CASE · SUCCESS`.
+El audio del comando **no se guarda**: vive en memoria mientras se transcribe y se
+descarta; nunca entra en `evidence/audio/`, que es exclusivo de la evidencia de
+auxilio. Si el monitoreo de auxilio está escuchando, el micrófono está ocupado y
+el asistente lo informa en lugar de competir por el dispositivo.
+
 ### IA contextual y fallback real
 
 Configuración central en `config.py`:
@@ -370,6 +516,17 @@ Modelo configurable: [Qwen2.5 3B](https://ollama.com/library/qwen2.5:3b).
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+`tests/test_alert_import.py` cubre la importación de alertas: validación del
+archivo, lectura tolerante de etiquetas pegadas, formatos de fecha, lectura real de
+una ficha sintética con el motor instalado, corrección manual de campos,
+comparación textual y contextual, la preparación facial sin niveles inventados, el
+alta y vínculo de casos, la cancelación con borrado de temporales y los permisos.
+
+`tests/test_assistant.py` cubre además el asistente administrativo: las veinte
+frases de ejemplo hacia sus intenciones, la ejecución de cada comando, el rechazo
+de intenciones sensibles, la restricción por rol, la elección manual entre varias
+personas, la bitácora y el contrato del proveedor de IA con transporte simulado.
 
 Incluye los escenarios semánticos solicitados y las ocho pruebas del módulo de
 evidencia: narración pasada sin evidencia, rechazo tras conversación ordinaria,

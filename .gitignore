@@ -8,3 +8,5 @@ data/
 *.log
 # Evidencia capturada localmente: nunca se versiona.
 evidence/
+# Fichas importadas: material temporal de trabajo.
+imports/

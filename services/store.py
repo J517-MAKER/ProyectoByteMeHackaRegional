@@ -15,6 +15,7 @@ matches = seed_matches()
 voice_events = seed_voice_events()
 alerts = seed_alerts()
 evidence = []
+imports = []
 deletion_requests = []
 users = seed_users()
 phrases = list(PHRASES)

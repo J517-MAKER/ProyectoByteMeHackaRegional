@@ -820,3 +820,115 @@ body {
     display: none;
   }
 }
+.assistant-dock {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.assistant-button.q-btn {
+  width: 52px;
+  height: 52px;
+  min-height: 52px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  border: 1px solid var(--navy);
+  box-shadow: 0 2px 6px rgba(20,43,59,.22);
+}
+.assistant-button.q-btn.listening {
+  background: #b54b43;
+  border-color: #b54b43;
+  animation: assistant-pulse 1.6s ease-in-out infinite;
+}
+.assistant-button.q-btn.processing {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+.assistant-button.q-btn.done {
+  background: #357358;
+  border-color: #357358;
+}
+.assistant-button.q-btn.failed {
+  background: #9d7426;
+  border-color: #9d7426;
+}
+@keyframes assistant-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(181,75,67,.30); }
+  50% { box-shadow: 0 0 0 7px rgba(181,75,67,0); }
+}
+.assistant-panel {
+  width: 286px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(20,43,59,.12);
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.assistant-title {
+  font-size: 10px;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.assistant-status {
+  font-size: 13px;
+  font-weight: 500;
+}
+.assistant-status.live::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b54b43;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.assistant-transcript {
+  font-size: 13px;
+  color: var(--ink);
+  background: #f5f7f8;
+  border-radius: 3px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+.assistant-outcome {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.assistant-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+.assistant-options {
+  gap: 4px;
+  width: 100%;
+}
+.assistant-option {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+.assistant-option:hover {
+  background: #f5f7f8;
+}
+@media (max-width:600px) {
+  .assistant-dock {
+    right: 14px;
+    bottom: 14px;
+  }
+  .assistant-panel {
+    width: calc(100vw - 42px);
+    max-width: 286px;
+  }
+}

@@ -17,7 +17,7 @@ REVIEW_BUTTONS = [('CONFIRMAR PARA ATENCIÓN', 'CONFIRMADO_PARA_ATENCION', 'Even
 
 
 @ui.page('/alerts')
-def alerts_page():
+def alerts_page(status:str=''):
     with PageLayout('/alerts', 'Revisión de evidencia',
                     'Eventos de voz para evaluación de una autoridad. La detección no confirma la existencia de un delito.'):
         selected = {'id': None}
@@ -155,7 +155,7 @@ def alerts_page():
             query = ui.input('Buscar cámara o frase', on_change=lambda: table.refresh()).props('outlined dense clearable')
             state = ui.select(['Todos', 'PENDIENTE_REVISION', 'EN_REVISION', 'CONFIRMADO_PARA_ATENCION',
                                'FALSO_POSITIVO', 'DELETION_REQUESTED', 'DELETION_APPROVED', 'DELETION_REJECTED'],
-                              value='Todos', label='Estado', on_change=lambda: table.refresh()).props('outlined dense')
+                              value=status or 'Todos', label='Estado', on_change=lambda: table.refresh()).props('outlined dense')
             ui.button('Actualizar', icon='refresh', on_click=lambda: table.refresh()).props('outline no-caps')
         table()
         requests()

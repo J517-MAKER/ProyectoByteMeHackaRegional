@@ -36,3 +36,12 @@ EVIDENCE_POST_SECONDS = 10
 # Ring buffer: pre-roll + window + post-roll with margin. Nothing older is kept.
 AUDIO_RING_SECONDS = EVIDENCE_PRE_SECONDS + AUDIO_WINDOW_SECONDS + EVIDENCE_POST_SECONDS + 15
 DEFAULT_CAMERA_ID = os.getenv('NEXO_CAMERA', 'CAM-008')
+
+# Importación de alertas de búsqueda: archivos temporales, nunca evidencia.
+IMPORT_DIR = BASE_DIR / 'imports'
+IMPORT_DOCUMENTS_DIR = IMPORT_DIR / 'documents'
+IMPORT_PHOTOS_DIR = IMPORT_DIR / 'photos'
+IMPORT_MAX_BYTES = 10 * 1024 * 1024
+IMPORT_RENDER_DPI = 200
+IMPORT_DATE_WINDOW_DAYS = 15
+OCR_LANGUAGE = os.getenv('OCR_LANGUAGE', 'spa')
