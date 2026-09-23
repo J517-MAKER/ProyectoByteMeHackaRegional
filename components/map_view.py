@@ -1,50 +1,129 @@
 from nicegui import ui
+import json
 from services.cameras_service import get_cameras
 
 COLORS = {'En línea':'#487965','Desconectada':'#8d999f','Alerta':'#b4544c','Posible coincidencia':'#bc9246'}
 
-
 def MapView(cameras=None,detections=None,selected=None,on_select=None,height=None):
     cameras = get_cameras() if cameras is None else cameras
     detection_list = [event.detection for event in (detections or [])]
-    with ui.element('div').classes('map-stage').style(f'height:{height}px' if height else ''):
-        plane = ui.element('div').classes('map-plane')
-        with plane:
-            ui.image('/assets/demo/map.svg').classes('map-background').props('no-spinner fit=fill')
-            if detection_list:
-                coords=[]
-                for detection in detection_list:
-                    cam=next((c for c in cameras if c.id==detection.camera_id),None)
-                    if cam:
-                        coords.append(f'{cam.x*12},{cam.y*7}')
-                if len(coords)>1:
-                    ui.html('<svg viewBox="0 0 1200 700" preserveAspectRatio="none" width="100%" height="100%"><polyline points="'+' '.join(coords)+'" fill="none" stroke="#3c6b8d" stroke-width="3" stroke-dasharray="7 9" opacity=".7"/></svg>',sanitize=False).classes('absolute inset-0 pointer-events-none')
-            for camera in cameras:
-                color = COLORS[camera.status]
-                detection = next((d for d in reversed(detection_list) if d.camera_id==camera.id),None)
-                detection_status = None
-                if detection:
-                    detection_status = detection.status
-                    color = '#487965' if detection.status=='Validada por operador' else '#8d999f' if detection.status=='Descartada' else '#bc9246'
-                if selected==camera.id:
-                    color='#245f83'
-                callback = (lambda cid=camera.id:on_select(cid)) if on_select else (lambda cid=camera.id:ui.navigate.to(f'/cameras?camera_id={cid}'))
-                ui.button(icon='close' if detection_status=='Descartada' else 'check' if detection_status=='Validada por operador' else 'videocam',on_click=callback).props('unelevated dense').classes('map-marker').style(f'left:{camera.x}%;top:{camera.y}%;background:{color}!important').tooltip(f'{camera.id} · {camera.name} · {detection_status or camera.status}')
-                ui.label(camera.id).classes('map-marker-label').style(f'left:{camera.x}%;top:{camera.y}%')
-        zoom={'value':1.0}
-        def scale(delta):
-            zoom['value']=max(1,min(1.8,zoom['value']+delta))
-            plane.style(f'transform:scale({zoom["value"]})')
-        with ui.element('div').classes('map-controls'):
-            ui.button(icon='add',on_click=lambda:scale(.2)).props('dense').tooltip('Acercar')
-            ui.button(icon='remove',on_click=lambda:scale(-.2)).props('dense').tooltip('Alejar')
-            ui.button(icon='center_focus_strong',on_click=lambda:scale(-2)).props('dense').tooltip('Restablecer vista')
-        ui.label('REGIÓN CENTRO · PLANO FICTICIO / SIN GEOLOCALIZACIÓN REAL').classes('map-note')
-    with ui.element('div').classes('map-legend'):
-        for status,color in COLORS.items():
-            with ui.element('div').classes('legend-item'):
-                ui.element('span').classes('legend-dot').style(f'background:{color}')
-                ui.label(status)
-        if detection_list:
-            ui.label('✓ Validada por operador · × Descartada · Ámbar: posible detección').classes('text-[10px]')
-            ui.label('– – Relación temporal; no representa una ruta').classes('text-[10px]')
+    
+    # Preparamos los datos de las cámaras para inyectarlos en JS
+    markers_data = []
+    for camera in cameras:
+        # Interpolamos X,Y (0-100) a Lat,Lng dentro de México
+        # Lat: 14.53 a 32.71 -> Rango = 18.18 (y invertido: 100=sur, 0=norte)
+        # Lng: -118.4 a -86.7 -> Rango = 31.7
+        lat = 32.718655 - (camera.y / 100.0) * 18.186557
+        lng = -118.407986 + (camera.x / 100.0) * 31.697581
+        
+        detection = next((d for d in reversed(detection_list) if d.camera_id==camera.id), None)
+        status = detection.status if detection else camera.status
+        color = '#487965' if status == 'Validada por operador' else '#8d999f' if status == 'Descartada' else '#bc9246' if detection else COLORS.get(camera.status, '#000000')
+        if selected == camera.id:
+            color = '#245f83'
+            
+        markers_data.append({
+            'id': camera.id,
+            'name': camera.name,
+            'lat': lat,
+            'lng': lng,
+            'status': status,
+            'color': color,
+            'selected': selected == camera.id
+        })
+        
+    markers_json = json.dumps(markers_data)
+    
+    map_html = f"""
+    <div id="google-map" style="width: 100%; height: 100%; border-radius: 8px;"></div>
+    <script>
+      function initMap() {{
+        const mexicoBounds = {{
+            north: 32.718655,
+            south: 14.532098,
+            west: -118.407986,
+            east: -86.710405
+        }};
+        const mapElement = document.getElementById("google-map");
+        if (!mapElement) return;
+        
+        const map = new google.maps.Map(mapElement, {{
+          center: {{ lat: 23.6345, lng: -102.5528 }},
+          zoom: 5,
+          restriction: {{
+            latLngBounds: mexicoBounds,
+            strictBounds: false,
+          }},
+          mapTypeId: 'roadmap',
+          styles: [
+            {{ elementType: "geometry", stylers: [{{ color: "#242f3e" }}] }},
+            {{ elementType: "labels.text.stroke", stylers: [{{ color: "#242f3e" }}] }},
+            {{ elementType: "labels.text.fill", stylers: [{{ color: "#746855" }}] }},
+            {{
+              featureType: "water",
+              elementType: "geometry",
+              stylers: [{{ color: "#17263c" }}],
+            }},
+          ]
+        }});
+        
+        // Agregar marcadores dinámicos
+        const markersData = {markers_json};
+        markersData.forEach(data => {{
+            // Custom marker icon usando el color calculado
+            const pinIcon = new google.maps.MarkerImage(
+                "http://chart.apis.google.com/chart?chst=d_map_pin_letter&chld=%E2%80%A2|" + data.color.replace('#', ''),
+                new google.maps.Size(21, 34),
+                new google.maps.Point(0,0),
+                new google.maps.Point(10, 34)
+            );
+            
+            const marker = new google.maps.Marker({{
+                position: {{ lat: data.lat, lng: data.lng }},
+                map: map,
+                title: data.id + " · " + data.name + " (" + data.status + ")",
+                icon: pinIcon
+            }});
+            
+            if (data.selected) {{
+                map.setCenter({{ lat: data.lat, lng: data.lng }});
+                map.setZoom(10);
+            }}
+        }});
+        
+        if (navigator.geolocation && !markersData.some(m => m.selected)) {{
+          navigator.geolocation.getCurrentPosition(
+            (position) => {{
+              const pos = {{
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+              }};
+              new google.maps.Marker({{
+                position: pos,
+                map: map,
+                title: "Tu ubicación",
+                icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+              }});
+            }},
+            () => {{ console.warn("Geolocation failed."); }}
+          );
+        }}
+      }}
+      
+      if (typeof google === 'undefined' || typeof google.maps === 'undefined') {{
+          const script = document.createElement('script');
+          script.src = "https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY_HERE&callback=initMap";
+          script.async = true;
+          script.defer = true;
+          window.initMap = initMap;
+          document.head.appendChild(script);
+      }} else {{
+          setTimeout(initMap, 100);
+      }}
+    </script>
+    """
+    
+    with ui.element('div').classes('map-stage').style(f'height:{height}px; position:relative;' if height else 'height: 500px; position:relative;'):
+        ui.html(map_html).classes('w-full h-full')
+        ui.label('MAPA INTERACTIVO · MÉXICO').classes('map-note').style('position: absolute; bottom: 10px; right: 10px; z-index: 1000;')
