@@ -1,5 +1,6 @@
 """Repositorio en memoria. Único punto que conoce los datos de demostración."""
 from datetime import datetime
+import config
 from mocks.alerts import seed_alerts
 from mocks.cameras import seed_cameras
 from mocks.cases import seed_cases
@@ -38,4 +39,21 @@ def now():
 
 
 def audit(user, kind, description, case_id='—', camera_id='—', result='Registrado'):
-    logs.insert(0, AuditLog(now(), user, kind, description, case_id, camera_id, result))
+    entry = AuditLog(now(), user, kind, description, case_id, camera_id, result, config.DEVICE_ID)
+    logs.insert(0, entry)
+    _sync_to_shared_history(entry)
+
+
+def _sync_to_shared_history(entry):
+    """Además de la memoria local, intenta guardar el registro en la base de
+    datos compartida para que todo el equipo lo vea sin importar el
+    dispositivo desde el que se generó. Si la base no está disponible la app
+    sigue funcionando sólo con la bitácora en memoria."""
+    if not config.HISTORY_DB_ENABLED:
+        return
+    try:
+        from services import db_service
+        db_service.guardar_historial(entry.timestamp, entry.user, entry.kind, entry.description,
+                                      entry.case_id, entry.camera_id, entry.result, entry.device)
+    except Exception as exc:
+        print(f'[historial] No se pudo sincronizar con la base de datos compartida: {exc}')

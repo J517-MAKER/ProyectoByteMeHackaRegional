@@ -32,8 +32,26 @@ def start_voice_retention():
     background_tasks.create(expire_voice_transcripts())
 
 
+def init_shared_history():
+    """Prepara la bitácora compartida en la base de datos. Si no hay conexión
+    disponible, el sistema sigue funcionando con la bitácora en memoria."""
+    if not config.HISTORY_DB_ENABLED:
+        return
+    try:
+        from services import db_service, store
+        db_service.asegurar_tabla_historial()
+        if db_service.historial_esta_vacio():
+            for entry in reversed(store.logs):
+                db_service.guardar_historial(entry.timestamp, entry.user, entry.kind, entry.description,
+                                              entry.case_id, entry.camera_id, entry.result, entry.device)
+        print('[historial] Bitácora compartida conectada a la base de datos.')
+    except Exception as exc:
+        print(f'[historial] Base de datos no disponible, se usará sólo la bitácora en memoria: {exc}')
+
+
 if not app.is_started:  # the interface tests re-execute this module
     app.on_startup(start_voice_retention)
+    app.on_startup(init_shared_history)
 
 
 @ui.page('/')

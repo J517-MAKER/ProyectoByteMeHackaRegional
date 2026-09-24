@@ -1,4 +1,5 @@
 import os
+import socket
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -8,6 +9,14 @@ HOST = os.getenv('NEXO_HOST', '127.0.0.1')
 PORT = int(os.getenv('NEXO_PORT', '8080'))
 DEMO_DATE = '2026-09-23'
 DATA_DIR = BASE_DIR / 'data'
+
+# Identifica el equipo/dispositivo que originó cada registro de la bitácora
+# compartida. Útil cuando varios operadores usan instancias distintas contra
+# la misma base de datos.
+DEVICE_ID = os.getenv('NEXO_DEVICE_ID') or socket.gethostname()
+# Historial compartido: si la base de datos no está disponible, la app sigue
+# funcionando con la bitácora en memoria del proceso (comportamiento previo).
+HISTORY_DB_ENABLED = os.getenv('NEXO_HISTORY_DB', 'true').lower() in ('true', '1', 'yes')
 
 VOICE_MODEL = os.getenv('VOICE_MODEL', 'base')
 VOICE_LANGUAGE = 'es'

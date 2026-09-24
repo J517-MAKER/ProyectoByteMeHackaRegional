@@ -42,6 +42,76 @@ def guardar_captura_rostro(codigo_camara: str, embedding: list, ruta_foto: str, 
         print(f"Error al guardar la captura en la BD: {e}")
         return None
 
+def asegurar_tabla_historial():
+    """Crea la tabla del historial compartido si todavía no existe.
+
+    Así el equipo no necesita correr una migración aparte: cualquier
+    instancia que se conecte a la misma base la deja lista.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS historial_operaciones (
+                    id SERIAL PRIMARY KEY,
+                    fecha_hora TIMESTAMP NOT NULL,
+                    usuario TEXT NOT NULL,
+                    tipo TEXT NOT NULL,
+                    descripcion TEXT NOT NULL,
+                    caso_id TEXT DEFAULT '—',
+                    camara_id TEXT DEFAULT '—',
+                    resultado TEXT DEFAULT 'Registrado',
+                    dispositivo TEXT DEFAULT '—',
+                    creado_en TIMESTAMP NOT NULL DEFAULT now()
+                );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_historial_fecha ON historial_operaciones (fecha_hora DESC);")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def historial_esta_vacio():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM historial_operaciones LIMIT 1;")
+            return cur.fetchone() is None
+    finally:
+        conn.close()
+
+
+def guardar_historial(timestamp, user, kind, description, case_id='—', camera_id='—', result='Registrado', device='—'):
+    """Inserta un registro de bitácora compartido entre todos los dispositivos del equipo."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO historial_operaciones
+                    (fecha_hora, usuario, tipo, descripcion, caso_id, camara_id, resultado, dispositivo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+            """, (timestamp, user, kind, description, case_id, camera_id, result, device))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def obtener_historial(limite=1000):
+    """Devuelve el historial compartido, más reciente primero."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT fecha_hora, usuario, tipo, descripcion, caso_id, camara_id, resultado, dispositivo
+                FROM historial_operaciones
+                ORDER BY fecha_hora DESC, id DESC
+                LIMIT %s;
+            """, (limite,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
 def buscar_coincidencias_rostro(embedding_busqueda, umbral=0.70, limite=10):
     with get_db_connection() as conn:
         with conn.cursor() as cur:

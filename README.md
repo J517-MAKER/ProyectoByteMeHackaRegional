@@ -125,7 +125,8 @@ FastAPI está disponible a través de `nicegui.app` si después se necesitan end
 
 - Todos los nombres son ficticios. Los retratos y capturas son **ilustraciones vectoriales sintéticas**, no fotografías de personas reales. El módulo de voz trabaja exclusivamente con audio real del micrófono: no existen campos para escribir frases de prueba.
 - El módulo de voz permite micrófono local y transcripción con faster-whisper; visión y seguimiento continúan simulados. Los estados y similitudes son ejemplos para revisión humana. Confirmar un evento no confirma un delito.
-- Los cambios y la bitácora viven en memoria del proceso, compartidos por las sesiones de demostración. **Se restablecen al reiniciar.** El almacenamiento de sesión de NiceGUI está en `.nicegui/`, excluido de Git.
+- Los cambios de casos, cámaras, voz, etc. viven en memoria del proceso, compartidos por las sesiones de demostración, y **se restablecen al reiniciar**. El almacenamiento de sesión de NiceGUI está en `.nicegui/`, excluido de Git.
+- La **bitácora** (`/history`) sí puede persistir: si hay conexión a la base de datos de PostgreSQL (ver «Historial compartido del equipo» abajo), cada registro se guarda ahí además de en memoria, y la página lee de esa base. Así el historial sobrevive a reinicios y muestra los registros de las cuatro instancias del equipo aunque cada quien cierre su propio software. Sin base de datos disponible, sigue funcionando igual que antes: sólo en memoria del proceso.
 - El selector de cuenta sirve para demostrar roles; **no es autenticación de producción**. La app no incluye SSO, gestión de credenciales, retención de evidencias ni auditoría inmutable. Estos puntos deben implementarse en los adaptadores de seguridad/backend antes de usar datos reales.
 - Las preferencias de configuración se guardan como valores de referencia; no activan servicios ni políticas reales.
 - Las escenas CCTV son estáticas. La actualización del monitor consulta los servicios simulados cada 15 segundos y la tabla de alertas cada 10 segundos.
@@ -143,6 +144,54 @@ El arranque y las once rutas también fueron comprobados mediante HTTP. La revis
 
 Referencia del framework: [documentación oficial de NiceGUI](https://nicegui.io/documentation).
 
+## Historial compartido del equipo (bitácora en PostgreSQL)
+
+El equipo son cuatro personas, cada una con su propia instancia de NEXO. Por
+defecto cada instancia sólo ve su propia bitácora en memoria, y ésta
+desaparece al cerrar el software. Para tener **un único historial** donde
+aparezcan los registros de las cuatro personas sin importar quién ni desde
+qué equipo los generó, las cuatro instancias deben apuntar a la **misma**
+base de datos PostgreSQL.
+
+1. Levanta la base compartida una sola vez, en el equipo o servidor que hará
+   de anfitrión (`docker-compose.yml` ya expone el puerto `5432` a la red, no
+   sólo a `localhost`):
+
+   ```bash
+   docker compose up -d postgres_db
+   ```
+
+2. En las otras tres instancias, define `DATABASE_URL` apuntando a la IP del
+   anfitrión antes de `python main.py` (ajusta usuario/clave/IP si cambiaron):
+
+   ```bash
+   export DATABASE_URL="dbname=db_desaparecidos user=admin password=mi_password_seguro host=<IP_DEL_ANFITRION> port=5432"
+   python main.py
+   ```
+
+   En Windows PowerShell: `$env:DATABASE_URL = "dbname=db_desaparecidos user=admin password=mi_password_seguro host=<IP_DEL_ANFITRION> port=5432"`.
+
+3. Al iniciar, cada instancia crea automáticamente la tabla
+   `historial_operaciones` si no existe (`services/db_service.py:asegurar_tabla_historial`)
+   y siembra la bitácora de demostración una sola vez, la primera vez que la
+   tabla está vacía. A partir de ahí, cada acción de cualquier persona
+   (`store.audit(...)`) se guarda en la base compartida además de en memoria,
+   y `/history` en todas las instancias muestra el mismo historial completo.
+
+Notas:
+
+- Cada registro guarda de qué equipo vino (`NEXO_DEVICE_ID`, por defecto el
+  nombre del host) en la columna «Dispositivo» de `/history`, útil para saber
+  quién generó cada entrada cuando son cuatro personas trabajando a la vez.
+- Si la base de datos no está disponible (sin Docker, sin red, credenciales
+  incorrectas), la app **no se cae**: cada instancia sigue funcionando sólo
+  con su bitácora en memoria, como en la versión original, y muestra un aviso
+  en la consola.
+- Para desactivar la sincronización a propósito (por ejemplo en pruebas
+  automatizadas), define `NEXO_HISTORY_DB=false`.
+- Este mecanismo es independiente de las tablas `camaras`, `capturas_alerta` y
+  `expedientes_desaparecidos` usadas por el módulo de reconocimiento facial:
+  comparten la misma base de datos pero no la misma tabla.
 
 ## Importar alertas de búsqueda (OCR)
 
